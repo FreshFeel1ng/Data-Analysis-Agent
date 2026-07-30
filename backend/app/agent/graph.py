@@ -92,7 +92,7 @@ def build_agent_graph():
 
     tools_list = create_tools()
     llm_with_tools = llm.bind_tools(tools_list)
-    tool_node = ToolNode(tools_list)
+    tool_node = ToolNode(tools=tools_list)
 
     async def initialize(state: AgentState) -> AgentState:
         """Initialize: prepare system prompt with training context and similar examples."""
