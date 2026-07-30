@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     # Milvus
     MILVUS_HOST: str = "localhost"
     MILVUS_PORT: int = 19530
+    MILVUS_DATABASE: str = "tool_usage"
     MILVUS_COLLECTION: str = "tool_usage"
 
     # LLM Provider: deepseek | openai

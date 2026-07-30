@@ -7,6 +7,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = settings.MILVUS_COLLECTION
+DATABASE_NAME = settings.MILVUS_DATABASE
 
 _LOCAL_DIM = 512
 _OPENAI_DIM = 1536
@@ -58,8 +59,8 @@ class MilvusService:
             return
         try:
             uri = f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}"
-            self._client = MilvusClient(uri=uri)
-            logger.info(f"Connected to Milvus at {uri}")
+            self._client = MilvusClient(uri=uri, db_name=DATABASE_NAME)
+            logger.info(f"Connected to Milvus at {uri}, db={DATABASE_NAME}")
             self._init_embeddings()
             self._ensure_collection()
             self._initialized = True
