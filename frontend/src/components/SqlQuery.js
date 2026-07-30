@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Send, Loader2, Database, ChevronDown, BarChart3 } from 'lucide-react';
 import { api } from '../api/client';
 
@@ -135,13 +136,28 @@ function SqlQuery() {
               分析结果
             </div>
             <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
               components={{
                 p: ({ children }) => <p style={{ fontSize: '14px', lineHeight: '1.7', marginBottom: '8px' }}>{children}</p>,
-                code: ({ children }) => (
-                  <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '13px' }}>
-                    {children}
-                  </code>
+                code: ({ className, children, ...props }) => {
+                  const isInline = !className;
+                  return isInline ? (
+                    <code style={{ background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px', fontSize: '13px' }}>
+                      {children}
+                    </code>
+                  ) : (
+                    <pre className="sql-block" style={{ margin: '12px 0', padding: '12px 16px' }}>
+                      <code className={className} {...props}>{children}</code>
+                    </pre>
+                  );
+                },
+                table: ({ children }) => (
+                  <div style={{ overflowX: 'auto', margin: '12px 0' }}>
+                    <table className="data-table">{children}</table>
+                  </div>
                 ),
+                th: ({ children }) => <th>{children}</th>,
+                td: ({ children }) => <td>{children}</td>,
               }}
             >
               {result.explanation}
