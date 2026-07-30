@@ -6,11 +6,13 @@ from pydantic import BaseModel, Field
 import json
 import pandas as pd
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
-import io
+from io import BytesIO
 import base64
+import traceback
 import logging
 
 logger = logging.getLogger(__name__)
@@ -24,26 +26,22 @@ class GetSchemaInput(BaseModel):
     table_name: Optional[str] = Field(default=None, description="Optional specific table name to filter")
 
 
-class GenerateChartInput(BaseModel):
-    data_json: str = Field(description="JSON serialized table data with columns and rows")
-    chart_type: str = Field(
-        description="Chart type: bar, line, pie, scatter, histogram, heatmap"
-    )
-    title: str = Field(description="Chart title")
-    x_column: Optional[str] = Field(default=None, description="Column for X axis")
-    y_column: Optional[str] = Field(default=None, description="Column for Y axis")
+class GetTableSampleInput(BaseModel):
+    table_name: str = Field(description="Table name to sample from")
+    limit: int = Field(default=5, description="Number of rows to return")
 
 
-class GetSimilarExamplesInput(BaseModel):
-    question: str = Field(description="The user's question to find similar past examples for")
+class RunPlottingCodeInput(BaseModel):
+    data_json: str = Field(description="JSON output from execute_sql tool, e.g. {\"columns\":[...],\"rows\":[[...]]}")
+    code: str = Field(description="Matplotlib/seaborn Python code using pre-loaded 'df' DataFrame")
 
 
 class ToolRegistry:
     """Manages tool instances with DB context injection."""
 
     def __init__(self):
-        self._db_session = None  # target DB session
-        self._app_db = None  # app PostgreSQL session
+        self._db_session = None
+        self._app_db = None
         self._db_conn = None
         self._user = None
         self._milvus = None
@@ -65,11 +63,19 @@ class ToolRegistry:
             if result.returns_rows:
                 rows = result.fetchall()
                 columns = list(result.keys())
-                data = {"columns": columns, "rows": [list(r) for r in rows][:200], "row_count": len(rows)}
+                # Convert all values to Python native types for JSON serialization
+                clean_rows = []
+                for row in rows[:200]:
+                    clean_rows.append([None if r is None else (float(r) if isinstance(r, (int, float)) else str(r)) for r in row])
+                data = {
+                    "columns": columns,
+                    "rows": clean_rows,
+                    "row_count": len(rows),
+                }
             else:
                 data = {"columns": [], "rows": [], "row_count": 0, "message": "Query executed (no rows returned)"}
             await self._db_session.commit()
-            return json.dumps(data, ensure_ascii=False, default=str)
+            return json.dumps(data, ensure_ascii=False)
         except Exception as e:
             logger.error(f"SQL execution failed: {e}")
             return json.dumps({"error": str(e)})
@@ -107,7 +113,7 @@ class ToolRegistry:
                     schema[t] = []
                 schema[t].append({"column": r[1], "type": r[2], "nullable": r[3]})
 
-            return json.dumps(schema, ensure_ascii=False, default=str)
+            return json.dumps(schema, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Schema retrieval failed: {e}")
             return json.dumps({"error": str(e)})
@@ -130,100 +136,68 @@ class ToolRegistry:
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def generate_chart(
-        self, data_json: str, chart_type: str, title: str,
-        x_column: Optional[str] = None, y_column: Optional[str] = None
-    ) -> str:
-        """Generate a chart image from data."""
-        logger.info(f"[Tool] generate_chart: {chart_type} - {title}")
+    def run_plotting_code(self, data_json: str, code: str) -> str:
+        """Execute LLM-generated Python plotting code with the given data."""
+        logger.info(f"[Tool] run_plotting_code:\n{code[:200]}...")
+
         try:
+            # Parse data into DataFrame
             data = json.loads(data_json)
-
-            # Support multiple data formats
-            if isinstance(data, list):
-                # [{col: val, ...}, ...] → DataFrame
+            if "columns" in data and "rows" in data:
+                df = pd.DataFrame(data["rows"], columns=data["columns"])
+            elif isinstance(data, list):
                 df = pd.DataFrame(data)
-            elif isinstance(data, dict):
-                if "columns" in data and "rows" in data:
-                    # {"columns": [...], "rows": [[...]]} → DataFrame
-                    df = pd.DataFrame(data.get("rows", []), columns=data.get("columns", []))
-                elif "data" in data:
-                    # {"data": [...]} → DataFrame
-                    inner = data["data"]
-                    df = pd.DataFrame(inner)
-                else:
-                    # Flat dict → DataFrame with one row
-                    df = pd.DataFrame([data])
             else:
-                return json.dumps({"error": "无法解析数据格式"})
+                return json.dumps({"error": "数据格式无法解析，请使用 execute_sql 返回的 JSON"})
 
-            if df.empty:
-                return json.dumps({"error": "没有可绘图的数据"})
-
-            # Auto-convert numeric columns
+            # Convert numeric columns
             for col in df.columns:
                 try:
                     df[col] = pd.to_numeric(df[col])
                 except (ValueError, TypeError):
                     pass
 
-            plt.figure(figsize=(10, 6))
-            sns.set_style("whitegrid")
-            # Set Chinese font AFTER sns.set_style to avoid override
-            plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial"]
+            # Set Chinese font
+            plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
             plt.rcParams["axes.unicode_minus"] = False
 
-            if chart_type == "bar":
-                x = x_column or df.columns[0]
-                y = y_column or (df.columns[1] if len(df.columns) > 1 else df.columns[0])
-                numeric_cols = df.select_dtypes(include="number").columns
-                if y not in numeric_cols and len(numeric_cols) > 0:
-                    y = numeric_cols[0]
-                sns.barplot(data=df, x=x, y=y)
+            # Execute LLM code in sandboxed namespace
+            namespace = {
+                "pd": pd,
+                "plt": plt,
+                "sns": sns,
+                "df": df,
+                "np": __import__("numpy"),
+            }
 
-            elif chart_type == "line":
-                x = x_column or df.columns[0]
-                y = y_column or (df.columns[1] if len(df.columns) > 1 else df.columns[0])
-                plt.plot(df[x], df[y], marker="o")
-                plt.xlabel(x)
-                plt.ylabel(y)
-
-            elif chart_type == "pie":
-                label_col = x_column or df.columns[0]
-                value_col = y_column or (df.columns[1] if len(df.columns) > 1 else df.columns[0])
-                numeric_cols = df.select_dtypes(include="number").columns
-                if value_col not in numeric_cols and len(numeric_cols) > 0:
-                    value_col = numeric_cols[0]
-                plt.pie(df[value_col], labels=df[label_col], autopct="%1.1f%%")
-
-            elif chart_type == "scatter":
-                x = x_column or df.columns[0]
-                y = y_column or (df.columns[1] if len(df.columns) > 1 else df.columns[0])
-                plt.scatter(df[x], df[y])
-
-            elif chart_type == "histogram":
-                col = x_column or df.select_dtypes(include="number").columns[0]
-                plt.hist(df[col], bins=20, edgecolor="black")
-
-            elif chart_type == "heatmap":
-                numeric_df = df.select_dtypes(include="number")
-                sns.heatmap(numeric_df.corr(), annot=True, cmap="coolwarm", fmt=".2f")
-
+            # Ensure figure creation
+            if "plt.figure" not in code and "plt.subplots" not in code:
+                full_code = "plt.figure(figsize=(10, 6))\n" + "sns.set_style('whitegrid')\n" + code + "\nplt.tight_layout()"
             else:
-                return json.dumps({"error": f"Unsupported chart type: {chart_type}"})
+                full_code = code + "\nplt.tight_layout()"
 
-            plt.title(title, fontsize=14)
-            plt.tight_layout()
+            exec(full_code, namespace)
 
-            buf = io.BytesIO()
-            plt.savefig(buf, format="png", dpi=60, bbox_inches="tight")
-            plt.close()
+            # Check if a figure was created
+            fig = plt.gcf()
+            if len(fig.axes) == 0:
+                return json.dumps({"error": "代码执行完毕但没有生成图表，请检查代码"})
+
+            buf = BytesIO()
+            fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
+            plt.close("all")
             buf.seek(0)
             img_b64 = base64.b64encode(buf.read()).decode()
-            return json.dumps({"image_base64": img_b64, "chart_type": chart_type, "title": title})
+
+            return json.dumps({
+                "image_base64": img_b64,
+                "success": True,
+            })
         except Exception as e:
-            logger.error(f"Chart generation failed: {e}")
-            return json.dumps({"error": str(e)})
+            logger.exception("Plotting code execution failed")
+            return json.dumps({
+                "error": f"代码执行失败: {str(e)}\n\n{traceback.format_exc()}"
+            })
 
     async def get_similar_examples(self, question: str) -> str:
         """Search Milvus for similar past tool usage examples."""

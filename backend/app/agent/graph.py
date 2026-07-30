@@ -1,6 +1,5 @@
 """LangGraph-based text-to-SQL agent with tool calling and self-improvement."""
 
-import asyncio
 import logging
 import json
 from typing import Annotated, TypedDict, Literal, Optional
@@ -52,19 +51,17 @@ def create_tools():
         return await tool_registry.get_table_sample(table_name, limit)
 
     @tool
-    def generate_chart(data_json: str, chart_type: str, title: str,
-                       x_column: Optional[str] = None, y_column: Optional[str] = None) -> str:
-        """生成可视化图表。data_json为JSON数组格式如[{"季度":"Q1","销量":14},{"季度":"Q2","销量":26}]。
-        chart_type: bar/line/pie/scatter/histogram/heatmap。x_column/y_column指定坐标轴列名。
-        返回含base64图片的JSON。"""
-        return tool_registry.generate_chart(data_json, chart_type, title, x_column, y_column)
+    def run_plotting_code(data_json: str, code: str) -> str:
+        """执行 LLM 生成的 Python 绘图代码。data_json 来自 execute_sql 的返回结果。
+        code 应使用预置的 df、plt、sns、pd、np 变量，最终返回含 base64 图片的 JSON。"""
+        return tool_registry.run_plotting_code(data_json, code)
 
     @tool
     async def get_similar_examples(question: str) -> str:
         """Find similar past successful tool usage examples. Input: question text."""
         return await tool_registry.get_similar_examples(question)
 
-    return [execute_sql, get_schema, get_table_sample, generate_chart, get_similar_examples]
+    return [execute_sql, get_schema, get_table_sample, run_plotting_code, get_similar_examples]
 
 
 def _create_llm():
@@ -152,7 +149,7 @@ def build_agent_graph():
                     logger.info(f"Tool {tool_name} succeeded, result length: {len(result_str)}")
 
                     # Truncate large results to avoid blowing up LLM context
-                    if tool_name == "generate_chart" and len(result_str) > 2000:
+                    if tool_name == "run_plotting_code" and len(result_str) > 2000:
                         try:
                             parsed = json.loads(result_str)
                             parsed.pop("image_base64", None)
@@ -198,7 +195,7 @@ def build_agent_graph():
                     data = json.loads(str(msg.content))
                     if msg.name == "execute_sql" and "error" not in data:
                         query_result = str(msg.content)
-                    if msg.name == "generate_chart" and "image_base64" in data:
+                    if msg.name == "run_plotting_code" and "image_base64" in data:
                         chart_info = str(msg.content)
                 except (json.JSONDecodeError, TypeError):
                     pass
