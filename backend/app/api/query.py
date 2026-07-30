@@ -40,6 +40,14 @@ async def ask_question(
     training_ctx = await get_training_context(db, req.db_connection_id)
     training_prompt = build_training_prompt(training_ctx)
 
+    # If training data exists, inject a strong instruction to skip schema calls
+    if training_prompt.strip():
+        training_prompt = (
+            "**重要：上面已包含完整的数据库表结构，直接基于这些信息编写SQL，不要使用get_schema和get_table_sample工具。**\n\n"
+            + training_prompt
+        )
+        logger.info(f"Training context loaded ({len(training_prompt)} chars)")
+
     # Search similar examples from Milvus
     similar = await milvus_service.search_similar_examples(req.question)
     similar_text = (

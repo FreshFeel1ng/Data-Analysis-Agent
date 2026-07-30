@@ -216,7 +216,7 @@ class ToolRegistry:
             plt.tight_layout()
 
             buf = io.BytesIO()
-            plt.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+            plt.savefig(buf, format="jpeg", dpi=60, bbox_inches="tight", quality=70)
             plt.close()
             buf.seek(0)
             img_b64 = base64.b64encode(buf.read()).decode()

@@ -89,7 +89,7 @@ function SqlQuery() {
 
         {chartBase64 && (
           <div className="chart-container">
-            <img src={`data:image/png;base64,${chartBase64}`} alt="Chart" />
+            <img src={`data:image/jpeg;base64,${chartBase64}`} alt="Chart" />
           </div>
         )}
 
