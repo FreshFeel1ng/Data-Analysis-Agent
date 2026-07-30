@@ -8,12 +8,7 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 import seaborn as sns
-
-# Configure Chinese font support
-plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
-plt.rcParams["axes.unicode_minus"] = False  # Fix minus sign display
 import io
 import base64
 import logging
@@ -174,6 +169,9 @@ class ToolRegistry:
 
             plt.figure(figsize=(10, 6))
             sns.set_style("whitegrid")
+            # Set Chinese font AFTER sns.set_style to avoid override
+            plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "Arial"]
+            plt.rcParams["axes.unicode_minus"] = False
 
             if chart_type == "bar":
                 x = x_column or df.columns[0]
