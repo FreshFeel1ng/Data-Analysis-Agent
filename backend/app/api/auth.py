@@ -44,7 +44,7 @@ async def login(data: UserLogin, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="账号已被禁用")
 
-    token = create_access_token({"sub": user.id, "role": user.role})
+    token = create_access_token({"sub": str(user.id), "role": user.role})
     await log_action(db, user.id, user.username, "login", success=True)
     return TokenResponse(
         access_token=token,
