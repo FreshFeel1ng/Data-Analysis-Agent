@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, Literal
 
 
 class Settings(BaseSettings):
@@ -20,7 +20,19 @@ class Settings(BaseSettings):
     MILVUS_PORT: int = 19530
     MILVUS_COLLECTION: str = "tool_usage_examples"
 
-    # OpenAI
+    # LLM Provider: deepseek | openai
+    LLM_PROVIDER: Literal["deepseek", "openai"] = "deepseek"
+    LLM_MODEL: str = "deepseek-chat"
+    LLM_API_KEY: str = ""
+    LLM_BASE_URL: str = "https://api.deepseek.com/v1"
+    LLM_TEMPERATURE: float = 0.0
+    LLM_MAX_TOKENS: int = 8192
+
+    # Embedding Provider: local | openai
+    EMBEDDING_PROVIDER: Literal["local", "openai"] = "local"
+    EMBEDDING_MODEL: str = "BAAI/bge-small-zh-v1.5"
+
+    # OpenAI (fallback/compat)
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o"
 
@@ -32,6 +44,10 @@ class Settings(BaseSettings):
             f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
+
+    @property
+    def effective_api_key(self) -> str:
+        return self.LLM_API_KEY or self.OPENAI_API_KEY
 
     class Config:
         env_file = ".env"

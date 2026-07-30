@@ -65,14 +65,30 @@ def create_tools():
     return [execute_sql, get_schema, get_table_sample, generate_chart, get_similar_examples]
 
 
+def _create_llm():
+    """Create LLM instance based on configured provider."""
+    if settings.LLM_PROVIDER == "deepseek":
+        return ChatOpenAI(
+            model=settings.LLM_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            api_key=settings.LLM_API_KEY,
+            base_url=settings.LLM_BASE_URL,
+        )
+    else:
+        return ChatOpenAI(
+            model=settings.LLM_MODEL or settings.OPENAI_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            api_key=settings.effective_api_key,
+            base_url=settings.LLM_BASE_URL if settings.LLM_BASE_URL else None,
+        )
+
+
 def build_agent_graph():
     """Build the LangGraph agent workflow for text-to-SQL."""
 
-    llm = ChatOpenAI(
-        model=settings.OPENAI_MODEL,
-        temperature=0,
-        openai_api_key=settings.OPENAI_API_KEY,
-    )
+    llm = _create_llm()
 
     tools_list = create_tools()
     llm_with_tools = llm.bind_tools(tools_list)

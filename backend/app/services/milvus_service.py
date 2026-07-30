@@ -1,18 +1,27 @@
 import logging
 from typing import Optional, List
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
-from langchain_openai import OpenAIEmbeddings
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = settings.MILVUS_COLLECTION
-DIMENSION = 1536  # OpenAI embedding dimension
+
+# Embedding dimension: local bge-small-zh = 512, OpenAI ada-002 = 1536
+_LOCAL_DIM = 512
+_OPENAI_DIM = 1536
+
+
+def _get_dimension() -> int:
+    return _LOCAL_DIM if settings.EMBEDDING_PROVIDER == "local" else _OPENAI_DIM
+
+
+DIMENSION = _get_dimension()
 
 
 class MilvusService:
     _instance: Optional["MilvusService"] = None
-    _embeddings: Optional[OpenAIEmbeddings] = None
+    _embeddings = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -20,17 +29,32 @@ class MilvusService:
             cls._instance._initialized = False
         return cls._instance
 
+    def _init_embeddings(self):
+        if settings.EMBEDDING_PROVIDER == "local":
+            from langchain_huggingface import HuggingFaceEmbeddings
+            self._embeddings = HuggingFaceEmbeddings(
+                model_name=settings.EMBEDDING_MODEL,
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+            logger.info(f"Loaded local embedding model: {settings.EMBEDDING_MODEL}")
+        else:
+            from langchain_openai import OpenAIEmbeddings
+            api_key = settings.LLM_API_KEY or settings.OPENAI_API_KEY
+            self._embeddings = OpenAIEmbeddings(
+                model="text-embedding-ada-002",
+                openai_api_key=api_key,
+                dimensions=_OPENAI_DIM,
+            )
+            logger.info("Using OpenAI embeddings (text-embedding-ada-002)")
+
     def _connect(self):
         if self._initialized:
             return
         try:
             connections.connect(host=settings.MILVUS_HOST, port=str(settings.MILVUS_PORT))
             logger.info(f"Connected to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
-            self._embeddings = OpenAIEmbeddings(
-                model="text-embedding-ada-002",
-                openai_api_key=settings.OPENAI_API_KEY,
-                dimensions=DIMENSION,
-            )
+            self._init_embeddings()
             self._ensure_collection()
             self._initialized = True
         except Exception as e:

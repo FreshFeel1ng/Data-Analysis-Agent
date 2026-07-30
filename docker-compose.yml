@@ -74,7 +74,12 @@ services:
       - POSTGRES_DB=data_agent
       - MILVUS_HOST=milvus
       - MILVUS_PORT=19530
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - LLM_PROVIDER=${LLM_PROVIDER:-deepseek}
+      - LLM_MODEL=${LLM_MODEL:-deepseek-chat}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://api.deepseek.com/v1}
+      - EMBEDDING_PROVIDER=${EMBEDDING_PROVIDER:-local}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - SECRET_KEY=${SECRET_KEY:-change-me-in-production}
     depends_on:
       postgres:

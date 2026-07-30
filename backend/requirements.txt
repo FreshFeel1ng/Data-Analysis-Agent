@@ -26,6 +26,11 @@ langgraph-checkpoint==2.0.10
 # LLM
 openai==1.59.3
 tiktoken==0.8.0
+langchain-huggingface==0.1.2
+
+# Local Embeddings (bge-small-zh-v1.5)
+sentence-transformers==3.4.1
+torch==2.5.1
 
 # Vector DB (Milvus)
 pymilvus==2.5.1
