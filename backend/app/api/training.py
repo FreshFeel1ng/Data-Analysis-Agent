@@ -3,7 +3,7 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from app.database import get_db
 from app.models.user import User
 from app.models.training import TrainingData, TrainingType
@@ -105,7 +105,7 @@ async def auto_import_schema(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Automatically import schema from a connected database as training data."""
+    """一键训练：从 INFORMATION_SCHEMA 自动提取 Schema 和 DDL，类似 vanna 方式."""
     if not check_tool_permission(user, "add_training_data"):
         raise HTTPException(status_code=403, detail="仅管理员可导入Schema")
 
@@ -114,35 +114,79 @@ async def auto_import_schema(
     if not db_conn:
         raise HTTPException(status_code=404, detail="数据库连接不存在")
 
+    # 清除该数据源的旧训练数据
+    await db.execute(delete(TrainingData).where(TrainingData.db_connection_id == db_connection_id))
+
     async with db_service.get_session(db_conn) as target_session:
+        from sqlalchemy import text
+
+        # 1. 获取完整 schema
         schema_info = await db_service.get_schema(db_conn)
 
-    # Format schema as training content
-    tables = {}
-    for col in schema_info:
-        t = col["table_name"]
-        if t not in tables:
-            tables[t] = []
-        tables[t].append(f"  {col['column_name']} ({col['data_type']})")
+        # 2. 获取表行数统计
+        table_names = list(set(c["table_name"] for c in schema_info))
+        row_counts = {}
+        for t in table_names:
+            try:
+                if db_conn.db_type == "postgresql":
+                    r = await target_session.execute(text(f'SELECT COUNT(*) FROM "{t}"'))
+                else:
+                    r = await target_session.execute(text(f"SELECT COUNT(*) FROM `{t}`"))
+                row_counts[t] = r.scalar()
+            except Exception:
+                row_counts[t] = "未知"
 
     count = 0
-    for table_name, columns in tables.items():
-        content = f"Table: {table_name}\n" + "\n".join(columns)
+
+    # 生成 DDL 语句
+    tables_schema = {}
+    for col in schema_info:
+        t = col["table_name"]
+        if t not in tables_schema:
+            tables_schema[t] = []
+        nullable = "NULL" if col["is_nullable"] == "YES" else "NOT NULL"
+        tables_schema[t].append(f'    {col["column_name"]} {col["data_type"]} {nullable}')
+
+    for table_name, columns in tables_schema.items():
+        ddl = f'CREATE TABLE "{table_name}" (\n' + ",\n".join(columns) + "\n);"
         record = TrainingData(
-            training_type=TrainingType.SCHEMA,
+            training_type=TrainingType.DDL,
             db_connection_id=db_connection_id,
-            content=content,
-            description=f"Auto-imported schema for {table_name}",
+            content=ddl,
+            description=f"表 {table_name}，约 {row_counts.get(table_name, '?')} 行",
             created_by=user.id,
         )
         db.add(record)
         count += 1
 
+    # 生成 Schema 汇总文档
+    schema_doc = "## 数据库表结构汇总\n\n"
+    for table_name, columns in tables_schema.items():
+        schema_doc += f"### {table_name}（约 {row_counts.get(table_name, '?')} 行）\n"
+        for col in schema_info:
+            if col["table_name"] == table_name:
+                schema_doc += f"- **{col['column_name']}**: {col['data_type']}\n"
+        schema_doc += "\n"
+
+    record = TrainingData(
+        training_type=TrainingType.DOCUMENTATION,
+        db_connection_id=db_connection_id,
+        content=schema_doc,
+        description=f"完整数据库结构文档，共 {len(tables_schema)} 张表",
+        created_by=user.id,
+    )
+    db.add(record)
+    count += 1
+
     await db.commit()
     await log_action(db, user.id, user.username, "training_auto_schema",
-                     detail=f"imported {count} tables from db_connection_id={db_connection_id}",
+                     detail=f"trained {len(tables_schema)} tables + 1 doc from db_connection_id={db_connection_id}",
                      success=True)
-    return {"message": f"已导入 {count} 张表的Schema", "table_count": count}
+    return {
+        "message": f"训练完成：{len(tables_schema)} 张表 DDL + 1 份文档",
+        "table_count": len(tables_schema),
+        "ddl_count": len(tables_schema),
+    }
 
 
 api_router.include_router(router)
