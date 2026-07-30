@@ -140,17 +140,18 @@ def build_agent_graph():
             tool_args = tc.get("args", {})
             tool_id = tc.get("id", "")
 
+            logger.info(f"Invoking tool: {tool_name} with args: {json.dumps(tool_args, ensure_ascii=False)[:300]}")
+
             if tool_name in tool_map:
                 try:
                     tool_func = tool_map[tool_name]
-                    # Handle both sync and async tools
-                    if asyncio.iscoroutinefunction(tool_func.func):
-                        result = await tool_func.ainvoke(tool_args)
-                    else:
-                        result = tool_func.invoke(tool_args)
+                    result = await tool_func.ainvoke(tool_args)
+                    logger.info(f"Tool {tool_name} succeeded, result length: {len(str(result))}")
                 except Exception as e:
+                    logger.exception(f"Tool {tool_name} failed: {e}")
                     result = json.dumps({"error": str(e)})
             else:
+                logger.warning(f"Unknown tool requested: {tool_name}")
                 result = json.dumps({"error": f"Unknown tool: {tool_name}"})
 
             tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_id, name=tool_name))
