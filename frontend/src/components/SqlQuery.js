@@ -65,8 +65,9 @@ function SqlQuery() {
   }, []);
 
   const downloadCsv = useCallback((cols, rows) => {
-    const csv = [cols.join(','), ...rows.map(r => r.map(c => `"${c ?? ''}"`).join(','))].join('\n');
-    downloadFile(csv, `data_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
+    const BOM = '\uFEFF';
+    const csv = BOM + [cols.join(','), ...rows.map(r => r.map(c => `"${c ?? ''}"`).join(','))].join('\n');
+    downloadFile(csv, `data_${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv;charset=utf-8');
   }, [downloadFile]);
 
   const downloadReport = useCallback((text, sql) => {
