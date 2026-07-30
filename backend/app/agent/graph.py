@@ -54,7 +54,9 @@ def create_tools():
     @tool
     def generate_chart(data_json: str, chart_type: str, title: str,
                        x_column: Optional[str] = None, y_column: Optional[str] = None) -> str:
-        """Generate a chart. Types: bar/line/pie/scatter/histogram/heatmap. Output: JSON with base64 image."""
+        """生成可视化图表。data_json为JSON数组格式如[{"季度":"Q1","销量":14},{"季度":"Q2","销量":26}]。
+        chart_type: bar/line/pie/scatter/histogram/heatmap。x_column/y_column指定坐标轴列名。
+        返回含base64图片的JSON。"""
         return tool_registry.generate_chart(data_json, chart_type, title, x_column, y_column)
 
     @tool

@@ -138,10 +138,34 @@ class ToolRegistry:
         logger.info(f"[Tool] generate_chart: {chart_type} - {title}")
         try:
             data = json.loads(data_json)
-            df = pd.DataFrame(data.get("rows", []), columns=data.get("columns", []))
+
+            # Support multiple data formats
+            if isinstance(data, list):
+                # [{col: val, ...}, ...] → DataFrame
+                df = pd.DataFrame(data)
+            elif isinstance(data, dict):
+                if "columns" in data and "rows" in data:
+                    # {"columns": [...], "rows": [[...]]} → DataFrame
+                    df = pd.DataFrame(data.get("rows", []), columns=data.get("columns", []))
+                elif "data" in data:
+                    # {"data": [...]} → DataFrame
+                    inner = data["data"]
+                    df = pd.DataFrame(inner)
+                else:
+                    # Flat dict → DataFrame with one row
+                    df = pd.DataFrame([data])
+            else:
+                return json.dumps({"error": "无法解析数据格式"})
 
             if df.empty:
-                return json.dumps({"error": "No data to plot"})
+                return json.dumps({"error": "没有可绘图的数据"})
+
+            # Auto-convert numeric columns
+            for col in df.columns:
+                try:
+                    df[col] = pd.to_numeric(df[col])
+                except (ValueError, TypeError):
+                    pass
 
             plt.figure(figsize=(10, 6))
             sns.set_style("whitegrid")
