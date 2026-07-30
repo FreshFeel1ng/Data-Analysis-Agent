@@ -1,13 +1,13 @@
 import logging
+import os
 from typing import Optional, List
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+from pymilvus import MilvusClient, DataType
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 COLLECTION_NAME = settings.MILVUS_COLLECTION
 
-# Embedding dimension: local bge-small-zh = 512, OpenAI ada-002 = 1536
 _LOCAL_DIM = 512
 _OPENAI_DIM = 1536
 
@@ -21,6 +21,7 @@ DIMENSION = _get_dimension()
 
 class MilvusService:
     _instance: Optional["MilvusService"] = None
+    _client: Optional[MilvusClient] = None
     _embeddings = None
 
     def __new__(cls):
@@ -31,6 +32,10 @@ class MilvusService:
 
     def _init_embeddings(self):
         if settings.EMBEDDING_PROVIDER == "local":
+            # Use HF mirror for mainland China
+            if not os.environ.get("HF_ENDPOINT"):
+                os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+
             from langchain_huggingface import HuggingFaceEmbeddings
             self._embeddings = HuggingFaceEmbeddings(
                 model_name=settings.EMBEDDING_MODEL,
@@ -52,8 +57,9 @@ class MilvusService:
         if self._initialized:
             return
         try:
-            connections.connect(host=settings.MILVUS_HOST, port=str(settings.MILVUS_PORT))
-            logger.info(f"Connected to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
+            uri = f"http://{settings.MILVUS_HOST}:{settings.MILVUS_PORT}"
+            self._client = MilvusClient(uri=uri)
+            logger.info(f"Connected to Milvus at {uri}")
             self._init_embeddings()
             self._ensure_collection()
             self._initialized = True
@@ -62,26 +68,29 @@ class MilvusService:
             self._initialized = True
 
     def _ensure_collection(self):
-        if utility.has_collection(COLLECTION_NAME):
+        if self._client.has_collection(COLLECTION_NAME):
             return
-        fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
-            FieldSchema(name="question", dtype=DataType.VARCHAR, max_length=4096),
-            FieldSchema(name="tool_name", dtype=DataType.VARCHAR, max_length=255),
-            FieldSchema(name="tool_params", dtype=DataType.VARCHAR, max_length=8192),
-            FieldSchema(name="user_id", dtype=DataType.INT64),
-            FieldSchema(name="username", dtype=DataType.VARCHAR, max_length=255),
-            FieldSchema(name="success", dtype=DataType.BOOL),
-            FieldSchema(name="created_at", dtype=DataType.VARCHAR, max_length=64),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=DIMENSION),
-        ]
-        schema = CollectionSchema(fields, description="Tool usage examples")
-        Collection(name=COLLECTION_NAME, schema=schema)
-        logger.info(f"Milvus collection '{COLLECTION_NAME}' created")
+        schema = self._client.create_schema(enable_dynamic_field=False)
+        schema.add_field("id", DataType.INT64, is_primary=True, auto_id=True)
+        schema.add_field("question", DataType.VARCHAR, max_length=4096)
+        schema.add_field("tool_name", DataType.VARCHAR, max_length=255)
+        schema.add_field("tool_params", DataType.VARCHAR, max_length=8192)
+        schema.add_field("user_id", DataType.INT64)
+        schema.add_field("username", DataType.VARCHAR, max_length=255)
+        schema.add_field("success", DataType.BOOL)
+        schema.add_field("created_at", DataType.VARCHAR, max_length=64)
+        schema.add_field("embedding", DataType.FLOAT_VECTOR, dim=DIMENSION)
 
-    def _get_collection(self) -> Collection:
-        self._connect()
-        return Collection(name=COLLECTION_NAME)
+        index_params = self._client.prepare_index_params()
+        index_params.add_index(field_name="embedding", index_type="IVF_FLAT", metric_type="COSINE", params={"nlist": 128})
+
+        self._client.create_collection(
+            collection_name=COLLECTION_NAME,
+            schema=schema,
+            index_params=index_params,
+            description="Tool usage examples",
+        )
+        logger.info(f"Milvus collection '{COLLECTION_NAME}' created")
 
     async def store_tool_usage(
         self,
@@ -92,30 +101,27 @@ class MilvusService:
         username: str,
         success: bool = True,
     ):
-        """Store successful tool usage as a vector example."""
         try:
             self._connect()
-            if self._embeddings is None:
+            if self._embeddings is None or self._client is None:
                 return
 
             embedding = await self._embeddings.aembed_query(question)
-            collection = self._get_collection()
 
             import json
             from datetime import datetime
 
-            data = [
-                [question],
-                [tool_name],
-                [json.dumps(tool_params, ensure_ascii=False)],
-                [user_id],
-                [username],
-                [success],
-                [datetime.now().isoformat()],
-                [embedding],
-            ]
-            collection.insert(data)
-            collection.flush()
+            data = [{
+                "question": question,
+                "tool_name": tool_name,
+                "tool_params": json.dumps(tool_params, ensure_ascii=False),
+                "user_id": user_id,
+                "username": username,
+                "success": success,
+                "created_at": datetime.now().isoformat(),
+                "embedding": embedding,
+            }]
+            self._client.insert(collection_name=COLLECTION_NAME, data=data)
             logger.info(f"Stored tool usage in Milvus: {tool_name}")
         except Exception as e:
             logger.error(f"Failed to store in Milvus: {e}")
@@ -123,21 +129,15 @@ class MilvusService:
     async def search_similar_examples(
         self, question: str, top_k: int = 5
     ) -> List[dict]:
-        """Search for similar past tool usages by semantic similarity."""
         try:
             self._connect()
-            if self._embeddings is None:
+            if self._embeddings is None or self._client is None:
                 return []
 
             embedding = await self._embeddings.aembed_query(question)
-            collection = self._get_collection()
-
-            collection.load()
-            search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
-            results = collection.search(
+            results = self._client.search(
+                collection_name=COLLECTION_NAME,
                 data=[embedding],
-                anns_field="embedding",
-                param=search_params,
                 limit=top_k,
                 output_fields=["question", "tool_name", "tool_params", "success"],
             )
@@ -145,12 +145,13 @@ class MilvusService:
             examples = []
             for hits in results:
                 for hit in hits:
-                    if hit.entity.get("success"):
+                    entity = hit.get("entity", {})
+                    if entity.get("success"):
                         examples.append({
-                            "question": hit.entity.get("question"),
-                            "tool_name": hit.entity.get("tool_name"),
-                            "tool_params": hit.entity.get("tool_params"),
-                            "score": float(hit.distance),
+                            "question": entity.get("question"),
+                            "tool_name": entity.get("tool_name"),
+                            "tool_params": entity.get("tool_params"),
+                            "score": hit.get("distance", 0),
                         })
             return examples
         except Exception as e:
