@@ -22,6 +22,15 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting {settings.APP_NAME}...")
     await init_db()
     logger.info("Database tables initialized")
+
+    # Pre-load embedding model at startup (avoids 20s first-query delay)
+    try:
+        from app.services.milvus_service import milvus_service
+        milvus_service._connect()
+        logger.info("Embedding model pre-loaded")
+    except Exception as e:
+        logger.warning(f"Pre-load failed (will retry on first query): {e}")
+
     yield
     logger.info("Shutting down...")
 

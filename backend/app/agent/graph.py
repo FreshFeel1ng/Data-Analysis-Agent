@@ -133,7 +133,7 @@ def build_agent_graph():
         return "finalize"
 
     async def process_tools(state: AgentState) -> AgentState:
-        """Manually invoke tools and return ToolMessages (ToolNode removed in LangGraph 1.x)."""
+        """Manually invoke tools and return ToolMessages."""
         last_msg = state["messages"][-1]
         tool_messages = []
 
@@ -148,15 +148,37 @@ def build_agent_graph():
                 try:
                     tool_func = tool_map[tool_name]
                     result = await tool_func.ainvoke(tool_args)
-                    logger.info(f"Tool {tool_name} succeeded, result length: {len(str(result))}")
+                    result_str = str(result)
+                    logger.info(f"Tool {tool_name} succeeded, result length: {len(result_str)}")
+
+                    # Truncate large results to avoid blowing up LLM context
+                    if tool_name == "generate_chart" and len(result_str) > 2000:
+                        try:
+                            parsed = json.loads(result_str)
+                            parsed.pop("image_base64", None)
+                            parsed["hint"] = f"[图表已生成，大小 {len(result_str)} 字节]"
+                            result_str = json.dumps(parsed, ensure_ascii=False)
+                        except (json.JSONDecodeError, TypeError):
+                            result_str = '{"message": "图表已生成"}'
+                    elif tool_name == "execute_sql" and len(result_str) > 4000:
+                        try:
+                            parsed = json.loads(result_str)
+                            row_count = parsed.get("row_count", 0)
+                            parsed["rows"] = parsed.get("rows", [])[:50]
+                            parsed["hint"] = f"[显示前50行，共 {row_count} 行]"
+                            result_str = json.dumps(parsed, ensure_ascii=False)
+                        except (json.JSONDecodeError, TypeError):
+                            result_str = result_str[:2000] + "..."
+                    elif len(result_str) > 4000:
+                        result_str = result_str[:2000] + f"\n...[截断，共 {len(result_str)} 字节]"
                 except Exception as e:
                     logger.exception(f"Tool {tool_name} failed: {e}")
-                    result = json.dumps({"error": str(e)})
+                    result_str = json.dumps({"error": str(e)})
             else:
                 logger.warning(f"Unknown tool requested: {tool_name}")
-                result = json.dumps({"error": f"Unknown tool: {tool_name}"})
+                result_str = json.dumps({"error": f"Unknown tool: {tool_name}"})
 
-            tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_id, name=tool_name))
+            tool_messages.append(ToolMessage(content=result_str, tool_call_id=tool_id, name=tool_name))
 
         state["messages"] = tool_messages
         return state
