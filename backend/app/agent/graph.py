@@ -1,5 +1,6 @@
 """LangGraph-based text-to-SQL agent with tool calling and self-improvement."""
 
+import asyncio
 import logging
 import json
 from typing import Annotated, TypedDict, Literal, Optional
@@ -7,7 +8,6 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
-from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.tools import tool
 
 from app.config import settings
@@ -91,11 +91,11 @@ def build_agent_graph():
     llm = _create_llm()
 
     tools_list = create_tools()
+    # Build name → function mapping for manual tool invocation
+    tool_map = {t.name: t for t in tools_list}
     llm_with_tools = llm.bind_tools(tools_list)
-    tool_node = ToolNode(tools=tools_list)
 
     async def initialize(state: AgentState) -> AgentState:
-        """Initialize: prepare system prompt with training context and similar examples."""
         question = state["question"]
         training_ctx = state.get("training_context", "")
         similar = state.get("similar_examples", "")
@@ -116,17 +116,14 @@ def build_agent_graph():
         return state
 
     async def call_model(state: AgentState) -> AgentState:
-        """Call the LLM with tools."""
         messages = state["messages"]
         response = await llm_with_tools.ainvoke(messages)
         state["messages"] = [response]
         return state
 
     def should_continue(state: AgentState) -> Literal["tools", "finalize"]:
-        """Decide whether to continue with tools or end."""
         last_msg = state["messages"][-1]
         if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
-            # Record tool usage for audit
             for tc in last_msg.tool_calls:
                 state["tool_names_used"].append(tc["name"])
                 state["tool_params_used"].append(tc.get("args", {}))
@@ -134,14 +131,34 @@ def build_agent_graph():
         return "finalize"
 
     async def process_tools(state: AgentState) -> AgentState:
-        """Process tool calls and add results to messages."""
+        """Manually invoke tools and return ToolMessages (ToolNode removed in LangGraph 1.x)."""
         last_msg = state["messages"][-1]
-        tool_messages = await tool_node.ainvoke({"messages": [last_msg]})
-        state["messages"] = tool_messages["messages"]
+        tool_messages = []
+
+        for tc in last_msg.tool_calls:
+            tool_name = tc["name"]
+            tool_args = tc.get("args", {})
+            tool_id = tc.get("id", "")
+
+            if tool_name in tool_map:
+                try:
+                    tool_func = tool_map[tool_name]
+                    # Handle both sync and async tools
+                    if asyncio.iscoroutinefunction(tool_func.func):
+                        result = await tool_func.ainvoke(tool_args)
+                    else:
+                        result = tool_func.invoke(tool_args)
+                except Exception as e:
+                    result = json.dumps({"error": str(e)})
+            else:
+                result = json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+            tool_messages.append(ToolMessage(content=str(result), tool_call_id=tool_id, name=tool_name))
+
+        state["messages"] = tool_messages
         return state
 
     async def finalize(state: AgentState) -> AgentState:
-        """Extract final response, SQL, and chart data from conversation."""
         messages = state["messages"]
         final_text = ""
         sql_text = None
@@ -161,7 +178,6 @@ def build_agent_graph():
                 except (json.JSONDecodeError, TypeError):
                     pass
 
-        # Extract SQL from content or tool calls
         for msg in messages:
             if hasattr(msg, "tool_calls") and msg.tool_calls:
                 for tc in msg.tool_calls:
@@ -173,7 +189,6 @@ def build_agent_graph():
         state["chart_data"] = chart_info
         state["query_result"] = query_result
 
-        # Add a summary message
         if sql_text or chart_info or query_result:
             summary = ""
             if sql_text:
@@ -209,7 +224,6 @@ async def run_analysis(
     training_context: str,
     similar_examples: str,
 ) -> dict:
-    """Run the agent graph and return analysis results."""
     initial_state: AgentState = {
         "messages": [],
         "question": question,
