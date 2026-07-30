@@ -19,7 +19,6 @@ function MainPage() {
           <Route path="/training" element={<Training />} />
           <Route path="/connections" element={<Connections />} />
         </Routes>
-        {window.location.pathname === '/' && !window.location.hash && <SqlQuery />}
       </div>
     </div>
   );
