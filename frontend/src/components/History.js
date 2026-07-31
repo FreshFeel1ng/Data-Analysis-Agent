@@ -53,14 +53,18 @@ function History() {
     try { return JSON.parse(jsonStr); } catch { return null; }
   };
 
-  const getChartOption = (chartData) => {
-    if (!chartData) return null;
+  const getChartOptions = (chartData) => {
+    if (!chartData) return [];
     try {
-      const parsed = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
-      if (parsed.echarts_option) return parsed.echarts_option;
-      if (parsed.image_base64) return parsed.image_base64; // legacy
-      return null;
-    } catch { return null; }
+      const raw = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
+      const items = Array.isArray(raw) ? raw : [raw];
+      return items.map(item => {
+        if (typeof item === 'string') item = JSON.parse(item);
+        if (item.echarts_option) return item.echarts_option;
+        if (item.image_base64) return item.image_base64;
+        return null;
+      }).filter(Boolean);
+    } catch { return []; }
   };
 
   const downloadChart = (option) => {
@@ -124,8 +128,8 @@ function History() {
           {records.map((r) => {
             const isOpen = expanded === r.id;
             const resultData = parseResult(r.result_json);
-            const chartOption = getChartOption(r.chart_data);
-            const hasDetail = r.sql || resultData || chartOption || r.explanation;
+            const chartOptions = getChartOptions(r.chart_data);
+            const hasDetail = r.sql || resultData || chartOptions.length > 0 || r.explanation;
 
             return (
               <div key={r.id} className="card" style={{ padding: '16px' }}>
@@ -172,27 +176,29 @@ function History() {
                       </div>
                     )}
 
-                    {chartOption && (
-                      <div style={{ marginBottom: '12px' }}>
+                    {chartOptions.length > 0 && chartOptions.map((option, idx) => (
+                      <div key={idx} style={{ marginBottom: '12px' }}>
                         <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
-                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>图表</span>
-                          <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(chartOption)}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>
+                            {chartOptions.length > 1 ? `图表 ${idx + 1}` : '图表'}
+                          </span>
+                          <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(option)}>
                             <Download size={14} /> 下载 PNG
                           </button>
                         </div>
-                        {typeof chartOption === 'string' ? (
-                          <img src={`data:image/png;base64,${chartOption}`} alt="Chart"
+                        {typeof option === 'string' ? (
+                          <img src={`data:image/png;base64,${option}`} alt="Chart"
                             style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
                         ) : (
                           <ReactEChartsCore
                             echarts={echarts}
-                            option={chartOption}
+                            option={option}
                             style={{ width: '100%', height: '350px' }}
                             notMerge={true}
                           />
                         )}
                       </div>
-                    )}
+                    ))}
 
                     {resultData && resultData.columns && (
                       <div style={{ marginBottom: '12px' }}>

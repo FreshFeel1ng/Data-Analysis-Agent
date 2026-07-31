@@ -123,17 +123,18 @@ function SqlQuery() {
       } catch (e) {}
     }
 
-    let echartsOption = null;
+    let chartOptions = [];
     if (result.chart_data) {
       try {
-        const chart = typeof result.chart_data === 'string' ? JSON.parse(result.chart_data) : result.chart_data;
-        if (chart.echarts_option) {
-          echartsOption = chart.echarts_option;
-        }
-        // Legacy: base64 image fallback
-        else if (chart.image_base64) {
-          echartsOption = chart.image_base64; // flag as legacy
-        }
+        const raw = typeof result.chart_data === 'string' ? JSON.parse(result.chart_data) : result.chart_data;
+        // Support both array and single object
+        const items = Array.isArray(raw) ? raw : [raw];
+        chartOptions = items.map(item => {
+          if (typeof item === 'string') item = JSON.parse(item);
+          if (item.echarts_option) return item.echarts_option;
+          if (item.image_base64) return item.image_base64; // legacy
+          return null;
+        }).filter(Boolean);
       } catch (e) {}
     }
 
@@ -180,30 +181,31 @@ function SqlQuery() {
           </div>
         )}
 
-        {/* Chart */}
-        {echartsOption && (
-          <div className="card">
+        {/* Charts */}
+        {chartOptions.length > 0 && chartOptions.map((option, idx) => (
+          <div className="card" key={idx}>
             <div className="flex items-center justify-between" style={{ marginBottom: '12px' }}>
-              <span style={{ fontSize: '15px', fontWeight: 600 }}>图表</span>
-              <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(echartsOption)}>
+              <span style={{ fontSize: '15px', fontWeight: 600 }}>
+                {chartOptions.length > 1 ? `图表 ${idx + 1}` : '图表'}
+              </span>
+              <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(option)}>
                 <Download size={14} /> 下载 PNG
               </button>
             </div>
-            {typeof echartsOption === 'string' ? (
-              // Legacy base64 image
+            {typeof option === 'string' ? (
               <div className="chart-container">
-                <img src={`data:image/png;base64,${echartsOption}`} alt="Chart" />
+                <img src={`data:image/png;base64,${option}`} alt="Chart" />
               </div>
             ) : (
               <ReactEChartsCore
                 echarts={echarts}
-                option={echartsOption}
+                option={option}
                 style={{ width: '100%', height: '400px' }}
                 notMerge={true}
               />
             )}
           </div>
-        )}
+        ))}
 
         {/* Analysis */}
         {result.explanation && (

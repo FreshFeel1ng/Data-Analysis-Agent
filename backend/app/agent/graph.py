@@ -25,7 +25,7 @@ class AgentState(TypedDict):
     similar_examples: str
     sql: Optional[str]
     query_result: Optional[str]
-    chart_data: Optional[str]
+    chart_data: Optional[list]  # list of ECharts option JSON strings
     final_response: Optional[str]
     success: bool
     tool_names_used: list[str]
@@ -152,7 +152,9 @@ def build_agent_graph():
                     if tool_name == "execute_sql":
                         state["query_result"] = original_result
                     elif tool_name == "generate_chart":
-                        state["chart_data"] = original_result
+                        charts = state.get("chart_data", []) or []
+                        charts.append(original_result)
+                        state["chart_data"] = charts
 
                     # Truncate large results for LLM context (state keeps full data)
                     llm_result = original_result

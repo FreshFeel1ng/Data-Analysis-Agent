@@ -108,6 +108,7 @@ async def ask_question(
             )
 
     # Save full result to query_history
+    charts = result_data.get("chart_data")
     history_record = QueryHistory(
         user_id=user.id,
         username=user.username,
@@ -116,7 +117,7 @@ async def ask_question(
         question=req.question,
         sql=result_data.get("sql"),
         result_json=result_data.get("result"),
-        chart_data=result_data.get("chart_data"),
+        chart_data=json.dumps(charts) if charts else None,
         explanation=result_data.get("explanation"),
         success=result_data.get("success", True),
         error_msg=result_data.get("error"),
