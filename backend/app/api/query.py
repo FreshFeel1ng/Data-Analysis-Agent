@@ -127,7 +127,6 @@ async def ask_question(
 
     return QueryResponse(
         id=history_record.id,
-        id=0,
         question=req.question,
         sql=result_data.get("sql"),
         result=result_data.get("result"),
