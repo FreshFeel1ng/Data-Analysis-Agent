@@ -275,15 +275,29 @@ async def run_analysis(
             "tool_params_used": final_state.get("tool_params_used", []),
         }
     except Exception as e:
-        logger.exception(f"Agent execution failed: {e}")
+        error_str = str(e)
+        logger.exception(f"Agent execution failed: {error_str}")
+
+        # Friendly messages for known errors
+        if "503" in error_str or "service_unavailable" in error_str.lower() or "too busy" in error_str.lower():
+            user_msg = "DeepSeek 服务当前繁忙，请稍后重试。建议等待 30 秒后再次提交问题。"
+        elif "401" in error_str or "authentication" in error_str.lower():
+            user_msg = "API Key 无效，请检查 DeepSeek 密钥配置。"
+        elif "429" in error_str or "rate" in error_str.lower():
+            user_msg = "API 调用频率过高，请稍后重试。"
+        elif "timeout" in error_str.lower() or "timed out" in error_str.lower():
+            user_msg = "请求超时，DeepSeek 服务响应过慢，请重试。"
+        else:
+            user_msg = f"分析过程中出错: {error_str}"
+
         return {
             "question": question,
             "sql": None,
             "result": None,
-            "explanation": f"分析过程中出错: {str(e)}",
+            "explanation": user_msg,
             "chart_data": None,
             "success": False,
             "tool_names_used": [],
             "tool_params_used": [],
-            "error": str(e),
+            "error": error_str,
         }

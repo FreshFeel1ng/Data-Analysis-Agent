@@ -10,8 +10,8 @@ class AuditLog(Base):
     user_id = Column(Integer, nullable=False, index=True)
     username = Column(String(100), nullable=False)
     action = Column(String(100), nullable=False)  # query, tool_call, login, training
-    tool_name = Column(String(100), nullable=True)
-    resource = Column(String(255), nullable=True)  # db_name.table_name
+    tool_name = Column(String(500), nullable=True)
+    resource = Column(String(500), nullable=True)  # db connection info
     detail = Column(Text, nullable=True)  # SQL query or parameters
     params = Column(JSON, nullable=True)  # tool parameters
     ip_address = Column(String(50), nullable=True)
