@@ -1,11 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
+import * as echarts from 'echarts/core';
+import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts';
+import { TitleComponent, TooltipComponent, GridComponent, LegendComponent, ToolboxComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import {
   Send, Loader2, Database, BarChart3,
   Download, FileDown, Copy, Check
 } from 'lucide-react';
 import { api } from '../api/client';
+
+echarts.use([BarChart, LineChart, PieChart, ScatterChart,
+  TitleComponent, TooltipComponent, GridComponent, LegendComponent, ToolboxComponent,
+  CanvasRenderer]);
 
 function SqlQuery() {
   const [question, setQuestion] = useState('');
@@ -52,16 +61,29 @@ function SqlQuery() {
     URL.revokeObjectURL(url);
   }, []);
 
-  const downloadChart = useCallback((base64) => {
-    const byteChars = atob(base64);
-    const byteArr = new Uint8Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) byteArr[i] = byteChars.charCodeAt(i);
-    const blob = new Blob([byteArr], { type: 'image/png' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
-    a.click();
-    URL.revokeObjectURL(url);
+  const chartRef = useRef(null);
+
+  const downloadChart = useCallback((option) => {
+    if (typeof option === 'string') {
+      // Legacy base64
+      const byteChars = atob(option);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
+      a.click(); URL.revokeObjectURL(url);
+    } else {
+      // ECharts: export via canvas
+      const chartEl = document.querySelector('.echarts-for-react canvas');
+      if (chartEl) {
+        const a = document.createElement('a');
+        a.href = chartEl.toDataURL('image/png');
+        a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
+        a.click();
+      }
+    }
   }, []);
 
   const downloadCsv = useCallback((cols, rows) => {
@@ -101,11 +123,17 @@ function SqlQuery() {
       } catch (e) {}
     }
 
-    let chartBase64 = null;
+    let echartsOption = null;
     if (result.chart_data) {
       try {
         const chart = typeof result.chart_data === 'string' ? JSON.parse(result.chart_data) : result.chart_data;
-        chartBase64 = chart.image_base64;
+        if (chart.echarts_option) {
+          echartsOption = chart.echarts_option;
+        }
+        // Legacy: base64 image fallback
+        else if (chart.image_base64) {
+          echartsOption = chart.image_base64; // flag as legacy
+        }
       } catch (e) {}
     }
 
@@ -153,17 +181,27 @@ function SqlQuery() {
         )}
 
         {/* Chart */}
-        {chartBase64 && (
+        {echartsOption && (
           <div className="card">
             <div className="flex items-center justify-between" style={{ marginBottom: '12px' }}>
               <span style={{ fontSize: '15px', fontWeight: 600 }}>图表</span>
-              <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(chartBase64)}>
+              <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(echartsOption)}>
                 <Download size={14} /> 下载 PNG
               </button>
             </div>
-            <div className="chart-container">
-              <img src={`data:image/png;base64,${chartBase64}`} alt="Chart" />
-            </div>
+            {typeof echartsOption === 'string' ? (
+              // Legacy base64 image
+              <div className="chart-container">
+                <img src={`data:image/png;base64,${echartsOption}`} alt="Chart" />
+              </div>
+            ) : (
+              <ReactEChartsCore
+                echarts={echarts}
+                option={echartsOption}
+                style={{ width: '100%', height: '400px' }}
+                notMerge={true}
+              />
+            )}
           </div>
         )}
 

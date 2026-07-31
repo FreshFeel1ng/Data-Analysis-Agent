@@ -51,17 +51,17 @@ def create_tools():
         return await tool_registry.get_table_sample(table_name, limit)
 
     @tool
-    def run_plotting_code(data_json: str, code: str) -> str:
-        """执行 LLM 生成的 Python 绘图代码。data_json 来自 execute_sql 的返回结果。
-        code 应使用预置的 df、plt、sns、pd、np 变量，最终返回含 base64 图片的 JSON。"""
-        return tool_registry.run_plotting_code(data_json, code)
+    def generate_chart(title: str, echarts_option: str) -> str:
+        """生成 ECharts 图表。echarts_option 是完整的 Apache ECharts 配置 JSON，
+        包含 title、tooltip、xAxis、yAxis、series 等字段。可生成柱状图、折线图、饼图、散点图、热力图等。"""
+        return tool_registry.generate_chart(title, echarts_option)
 
     @tool
     async def get_similar_examples(question: str) -> str:
         """Find similar past successful tool usage examples. Input: question text."""
         return await tool_registry.get_similar_examples(question)
 
-    return [execute_sql, get_schema, get_table_sample, run_plotting_code, get_similar_examples]
+    return [execute_sql, get_schema, get_table_sample, generate_chart, get_similar_examples]
 
 
 def _create_llm():
@@ -151,21 +151,18 @@ def build_agent_graph():
                     # Save SQL and chart data to state before truncating
                     if tool_name == "execute_sql":
                         state["query_result"] = original_result
-                    elif tool_name == "run_plotting_code":
-                        try:
-                            parsed = json.loads(original_result)
-                            if "image_base64" in parsed:
-                                state["chart_data"] = original_result
-                        except (json.JSONDecodeError, TypeError):
-                            pass
+                    elif tool_name == "generate_chart":
+                        state["chart_data"] = original_result
 
                     # Truncate large results for LLM context (state keeps full data)
                     llm_result = original_result
-                    if tool_name == "run_plotting_code" and len(llm_result) > 2000:
+                    if tool_name == "generate_chart" and len(llm_result) > 2000:
                         try:
                             parsed = json.loads(llm_result)
-                            parsed.pop("image_base64", None)
-                            parsed["hint"] = f"[图表已生成，大小 {len(original_result)} 字节]"
+                            if "echarts_option" in parsed:
+                                opt = parsed["echarts_option"]
+                                parsed["echarts_option"] = {"_summary": f"[{opt.get('title',{}).get('text','')} {len(json.dumps(opt))} bytes]"}
+                            parsed["hint"] = f"[图表配置已生成]"
                             llm_result = json.dumps(parsed, ensure_ascii=False)
                         except (json.JSONDecodeError, TypeError):
                             llm_result = '{"message": "图表已生成"}'

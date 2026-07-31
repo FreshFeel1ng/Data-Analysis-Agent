@@ -1,8 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
+import * as echarts from 'echarts/core';
+import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts';
+import { TitleComponent, TooltipComponent, GridComponent, LegendComponent, ToolboxComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react';
 import { api } from '../api/client';
+
+echarts.use([BarChart, LineChart, PieChart, ScatterChart,
+  TitleComponent, TooltipComponent, GridComponent, LegendComponent, ToolboxComponent,
+  CanvasRenderer]);
 
 function History() {
   const [records, setRecords] = useState([]);
@@ -44,23 +53,35 @@ function History() {
     try { return JSON.parse(jsonStr); } catch { return null; }
   };
 
-  const getChartBase64 = (chartData) => {
+  const getChartOption = (chartData) => {
     if (!chartData) return null;
     try {
       const parsed = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
-      return parsed.image_base64;
+      if (parsed.echarts_option) return parsed.echarts_option;
+      if (parsed.image_base64) return parsed.image_base64; // legacy
+      return null;
     } catch { return null; }
   };
 
-  const downloadChart = (base64) => {
-    const byteChars = atob(base64);
-    const bytes = new Uint8Array(byteChars.length);
-    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
-    const blob = new Blob([bytes], { type: 'image/png' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
-    a.click(); URL.revokeObjectURL(url);
+  const downloadChart = (option) => {
+    if (typeof option === 'string') {
+      const byteChars = atob(option);
+      const bytes = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([bytes], { type: 'image/png' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
+      a.click(); URL.revokeObjectURL(url);
+    } else {
+      const chartEl = document.querySelector('.echarts-for-react canvas');
+      if (chartEl) {
+        const a = document.createElement('a');
+        a.href = chartEl.toDataURL('image/png');
+        a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
+        a.click();
+      }
+    }
   };
 
   const downloadCsv = (cols, rows) => {
@@ -103,8 +124,8 @@ function History() {
           {records.map((r) => {
             const isOpen = expanded === r.id;
             const resultData = parseResult(r.result_json);
-            const chartB64 = getChartBase64(r.chart_data);
-            const hasDetail = r.sql || resultData || chartB64 || r.explanation;
+            const chartOption = getChartOption(r.chart_data);
+            const hasDetail = r.sql || resultData || chartOption || r.explanation;
 
             return (
               <div key={r.id} className="card" style={{ padding: '16px' }}>
@@ -151,16 +172,25 @@ function History() {
                       </div>
                     )}
 
-                    {chartB64 && (
-                      <div style={{ marginBottom: '12px', textAlign: 'center' }}>
+                    {chartOption && (
+                      <div style={{ marginBottom: '12px' }}>
                         <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
                           <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>图表</span>
-                          <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(chartB64)}>
+                          <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(chartOption)}>
                             <Download size={14} /> 下载 PNG
                           </button>
                         </div>
-                        <img src={`data:image/png;base64,${chartB64}`} alt="Chart"
-                          style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+                        {typeof chartOption === 'string' ? (
+                          <img src={`data:image/png;base64,${chartOption}`} alt="Chart"
+                            style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
+                        ) : (
+                          <ReactEChartsCore
+                            echarts={echarts}
+                            option={chartOption}
+                            style={{ width: '100%', height: '350px' }}
+                            notMerge={true}
+                          />
+                        )}
                       </div>
                     )}
 

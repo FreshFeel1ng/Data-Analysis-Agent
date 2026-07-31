@@ -1,39 +1,13 @@
 """Agent tools for text-to-SQL analysis."""
 
 from langchain_core.tools import tool
-from typing import Optional, List, Dict, Any
+from typing import Optional
 from pydantic import BaseModel, Field
 import json
 import pandas as pd
-import matplotlib
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import seaborn as sns
-from io import BytesIO
-import base64
-import traceback
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class ExecuteSQLInput(BaseModel):
-    sql: str = Field(description="The SQL query to execute on the target database")
-
-
-class GetSchemaInput(BaseModel):
-    table_name: Optional[str] = Field(default=None, description="Optional specific table name to filter")
-
-
-class GetTableSampleInput(BaseModel):
-    table_name: str = Field(description="Table name to sample from")
-    limit: int = Field(default=5, description="Number of rows to return")
-
-
-class RunPlottingCodeInput(BaseModel):
-    data_json: str = Field(description="JSON output from execute_sql tool, e.g. {\"columns\":[...],\"rows\":[[...]]}")
-    code: str = Field(description="Matplotlib/seaborn Python code using pre-loaded 'df' DataFrame")
 
 
 class ToolRegistry:
@@ -63,17 +37,15 @@ class ToolRegistry:
             if result.returns_rows:
                 rows = result.fetchall()
                 columns = list(result.keys())
-                # Convert all values to Python native types for JSON serialization
                 clean_rows = []
                 for row in rows[:200]:
-                    clean_rows.append([None if r is None else (float(r) if isinstance(r, (int, float)) else str(r)) for r in row])
-                data = {
-                    "columns": columns,
-                    "rows": clean_rows,
-                    "row_count": len(rows),
-                }
+                    clean_rows.append([
+                        None if r is None else (float(r) if isinstance(r, (int, float)) else str(r))
+                        for r in row
+                    ])
+                data = {"columns": columns, "rows": clean_rows, "row_count": len(rows)}
             else:
-                data = {"columns": [], "rows": [], "row_count": 0, "message": "Query executed (no rows returned)"}
+                data = {"columns": [], "rows": [], "row_count": 0, "message": "Query executed"}
             await self._db_session.commit()
             return json.dumps(data, ensure_ascii=False)
         except Exception as e:
@@ -99,7 +71,6 @@ class ToolRegistry:
                     FROM information_schema.columns
                     WHERE table_schema = '{self._db_conn.database}'
                 """
-
             if table_name:
                 base_sql += f" AND table_name = '{table_name}'"
             base_sql += " ORDER BY table_name, ordinal_position"
@@ -112,7 +83,6 @@ class ToolRegistry:
                 if t not in schema:
                     schema[t] = []
                 schema[t].append({"column": r[1], "type": r[2], "nullable": r[3]})
-
             return json.dumps(schema, ensure_ascii=False)
         except Exception as e:
             logger.error(f"Schema retrieval failed: {e}")
@@ -131,73 +101,38 @@ class ToolRegistry:
             result = await self._db_session.execute(text(sql))
             rows = result.fetchall()
             columns = list(result.keys())
-            data = {"columns": columns, "rows": [list(r) for r in rows]}
-            return json.dumps(data, ensure_ascii=False, default=str)
+            return json.dumps({"columns": columns, "rows": [list(r) for r in rows]}, ensure_ascii=False, default=str)
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    def run_plotting_code(self, data_json: str, code: str) -> str:
-        """Execute LLM-generated Python plotting code with the given data."""
-        logger.info(f"[Tool] run_plotting_code:\n{code[:200]}...")
-
+    def generate_chart(self, title: str, echarts_option: str) -> str:
+        """Validate and return ECharts option JSON. LLM 生成此 JSON 配置，前端用 Apache ECharts 渲染."""
+        logger.info(f"[Tool] generate_chart: {title}")
         try:
-            # Parse data into DataFrame
-            data = json.loads(data_json)
-            if "columns" in data and "rows" in data:
-                df = pd.DataFrame(data["rows"], columns=data["columns"])
-            elif isinstance(data, list):
-                df = pd.DataFrame(data)
-            else:
-                return json.dumps({"error": "数据格式无法解析，请使用 execute_sql 返回的 JSON"})
+            option = json.loads(echarts_option)
 
-            # Convert numeric columns
-            for col in df.columns:
-                try:
-                    df[col] = pd.to_numeric(df[col])
-                except (ValueError, TypeError):
-                    pass
-
-            # Set Chinese font
-            plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei"]
-            plt.rcParams["axes.unicode_minus"] = False
-
-            # Execute LLM code in sandboxed namespace
-            namespace = {
-                "pd": pd,
-                "plt": plt,
-                "sns": sns,
-                "df": df,
-                "np": __import__("numpy"),
-            }
-
-            # Ensure figure creation
-            if "plt.figure" not in code and "plt.subplots" not in code:
-                full_code = "plt.figure(figsize=(10, 6))\n" + "sns.set_style('whitegrid')\n" + code + "\nplt.tight_layout()"
-            else:
-                full_code = code + "\nplt.tight_layout()"
-
-            exec(full_code, namespace)
-
-            # Check if a figure was created
-            fig = plt.gcf()
-            if len(fig.axes) == 0:
-                return json.dumps({"error": "代码执行完毕但没有生成图表，请检查代码"})
-
-            buf = BytesIO()
-            fig.savefig(buf, format="png", dpi=80, bbox_inches="tight")
-            plt.close("all")
-            buf.seek(0)
-            img_b64 = base64.b64encode(buf.read()).decode()
-
-            return json.dumps({
-                "image_base64": img_b64,
-                "success": True,
+            # Ensure required top-level fields
+            if "title" not in option:
+                option["title"] = {"text": title, "left": "center"}
+            if "tooltip" not in option:
+                option["tooltip"] = {}
+            if "xAxis" not in option and "series" in option:
+                option["xAxis"] = {"type": "category"}
+            if "yAxis" not in option and "series" in option:
+                option["yAxis"] = {"type": "value"}
+            # Set default toolbox with save-as-image
+            option.setdefault("toolbox", {
+                "feature": {"saveAsImage": {"title": "下载"}},
+                "right": 10
             })
-        except Exception as e:
-            logger.exception("Plotting code execution failed")
-            return json.dumps({
-                "error": f"代码执行失败: {str(e)}\n\n{traceback.format_exc()}"
-            })
+            # Set default series label
+            for s in option.get("series", []):
+                if s.get("type") in ("bar", "line"):
+                    s.setdefault("label", {"show": True, "position": "top"})
+
+            return json.dumps({"echarts_option": option, "success": True}, ensure_ascii=False)
+        except json.JSONDecodeError as e:
+            return json.dumps({"error": f"ECharts JSON 格式错误: {str(e)}", "success": False})
 
     async def get_similar_examples(self, question: str) -> str:
         """Search Milvus for similar past tool usage examples."""
