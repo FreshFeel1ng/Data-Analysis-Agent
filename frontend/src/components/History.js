@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Copy, Download } from 'lucide-react';
+import { Clock, CheckCircle, XCircle, ChevronDown, ChevronUp, Trash2, Download } from 'lucide-react';
 import { api } from '../api/client';
 
 function History() {
@@ -50,6 +50,38 @@ function History() {
       const parsed = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
       return parsed.image_base64;
     } catch { return null; }
+  };
+
+  const downloadChart = (base64) => {
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    const blob = new Blob([bytes], { type: 'image/png' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `chart_${new Date().toISOString().slice(0, 10)}.png`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const downloadCsv = (cols, rows) => {
+    const BOM = '\uFEFF';
+    const csv = BOM + [cols.join(','), ...rows.map(r => r.map(c => `"${c ?? ''}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `data_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click(); URL.revokeObjectURL(url);
+  };
+
+  const downloadReport = (record) => {
+    const md = ['# 数据分析报告', `时间: ${new Date().toLocaleString('zh-CN')}`, '', `问题: ${record.question}`, '',
+      record.sql ? `## SQL\n\`\`\`sql\n${record.sql}\n\`\`\`` : '',
+      '## 分析结果', record.explanation || ''].filter(Boolean).join('\n\n');
+    const blob = new Blob([md], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `report_${new Date().toISOString().slice(0, 10)}.md`;
+    a.click(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -110,7 +142,9 @@ function History() {
                   <div style={{ marginTop: '16px', paddingTop: '16px', borderTop: '1px solid #e2e8f0' }}>
                     {r.sql && (
                       <div style={{ marginBottom: '12px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#64748b' }}>SQL</div>
+                        <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>SQL</span>
+                        </div>
                         <pre style={{ background: '#1e293b', color: '#e2e8f0', padding: '12px', borderRadius: '8px', fontSize: '12px', overflowX: 'auto', whiteSpace: 'pre-wrap' }}>
                           {r.sql}
                         </pre>
@@ -119,7 +153,12 @@ function History() {
 
                     {chartB64 && (
                       <div style={{ marginBottom: '12px', textAlign: 'center' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#64748b', textAlign: 'left' }}>图表</div>
+                        <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>图表</span>
+                          <button className="btn btn-sm btn-secondary" onClick={() => downloadChart(chartB64)}>
+                            <Download size={14} /> 下载 PNG
+                          </button>
+                        </div>
                         <img src={`data:image/png;base64,${chartB64}`} alt="Chart"
                           style={{ maxWidth: '100%', maxHeight: '400px', borderRadius: '8px' }} />
                       </div>
@@ -127,8 +166,11 @@ function History() {
 
                     {resultData && resultData.columns && (
                       <div style={{ marginBottom: '12px' }}>
-                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#64748b' }}>
-                          数据 ({resultData.row_count} 行)
+                        <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>数据 ({resultData.row_count} 行)</span>
+                          <button className="btn btn-sm btn-secondary" onClick={() => downloadCsv(resultData.columns, resultData.rows || [])}>
+                            <Download size={14} /> 下载 CSV
+                          </button>
                         </div>
                         <div style={{ overflowX: 'auto', maxHeight: '300px', overflowY: 'auto' }}>
                           <table className="data-table" style={{ fontSize: '12px' }}>
@@ -147,7 +189,12 @@ function History() {
 
                     {r.explanation && (
                       <div>
-                        <div style={{ fontSize: '13px', fontWeight: 600, marginBottom: '6px', color: '#64748b' }}>分析结果</div>
+                        <div className="flex items-center justify-between" style={{ marginBottom: '6px' }}>
+                          <span style={{ fontSize: '13px', fontWeight: 600, color: '#64748b' }}>分析结果</span>
+                          <button className="btn btn-sm btn-secondary" onClick={() => downloadReport(r)}>
+                            <Download size={14} /> 下载报告
+                          </button>
+                        </div>
                         <div style={{ fontSize: '14px', lineHeight: '1.7' }}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>
                             {r.explanation}
