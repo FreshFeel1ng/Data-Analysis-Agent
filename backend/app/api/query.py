@@ -78,17 +78,20 @@ async def ask_question(
         )
 
     # Audit log
+    tools_list = result_data.get("tool_names_used", [])
     await log_action(
         db,
         user.id,
         user.username,
         "query",
+        tool_name=", ".join(tools_list) if tools_list else None,
+        resource=f"{db_conn.db_type}://{db_conn.host}:{db_conn.port}/{db_conn.database}",
         detail=req.question,
         params={
             "db_connection_id": req.db_connection_id,
             "db_name": db_conn.name,
             "sql": result_data.get("sql"),
-            "tools_used": result_data.get("tool_names_used", []),
+            "tools_used": tools_list,
         },
         success=result_data.get("success", True),
         error_msg=result_data.get("error"),

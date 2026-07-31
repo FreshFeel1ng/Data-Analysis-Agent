@@ -2,7 +2,7 @@
 import json
 from pymilvus import MilvusClient
 
-client = MilvusClient(uri="http://localhost:19530")
+client = MilvusClient(uri="http://localhost:19530", db_name="tool_usage")
 
 # Schema
 fields_desc = client.describe_collection("tool_usage")
