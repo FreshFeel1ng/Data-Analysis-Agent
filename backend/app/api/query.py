@@ -8,6 +8,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models.user import User
 from app.models.db_connection import DBConnection
+from app.models.query_history import QueryHistory
 from app.schemas.query import QueryRequest, QueryResponse
 from app.core.auth import get_current_user
 from app.core.permissions import check_tool_permission
@@ -106,7 +107,26 @@ async def ask_question(
                 success=True,
             )
 
+    # Save full result to query_history
+    history_record = QueryHistory(
+        user_id=user.id,
+        username=user.username,
+        db_connection_id=req.db_connection_id,
+        db_name=db_conn.name,
+        question=req.question,
+        sql=result_data.get("sql"),
+        result_json=result_data.get("result"),
+        chart_data=result_data.get("chart_data"),
+        explanation=result_data.get("explanation"),
+        success=result_data.get("success", True),
+        error_msg=result_data.get("error"),
+    )
+    db.add(history_record)
+    await db.commit()
+    await db.refresh(history_record)
+
     return QueryResponse(
+        id=history_record.id,
         id=0,
         question=req.question,
         sql=result_data.get("sql"),
