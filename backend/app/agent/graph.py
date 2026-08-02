@@ -144,7 +144,7 @@ def build_agent_graph():
             if tool_name in tool_map:
                 try:
                     tool_func = tool_map[tool_name]
-                    result = await tool_func.ainvoke(tool_args)
+                    result = await tool_func.ainvoke(tool_args)  # type: ignore[attr-defined]
                     original_result = str(result)
                     logger.info(f"Tool {tool_name} succeeded, result length: {len(original_result)}")
 
