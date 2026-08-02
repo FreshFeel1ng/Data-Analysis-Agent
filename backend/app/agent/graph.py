@@ -152,6 +152,20 @@ def build_agent_graph():
                     # Save SQL and chart data to state before truncating
                     if tool_name == "execute_sql":
                         state["query_result"] = original_result
+                        # Mask sensitive columns before sending to LLM
+                        try:
+                            parsed = json.loads(original_result)
+                            sensitive_patterns = {"phone", "email", "password", "id_card", "ssn", "address", "mobile", "tel", "身份证", "手机", "电话", "地址"}
+                            if "columns" in parsed:
+                                mask_cols = [i for i, c in enumerate(parsed["columns"]) if any(p in c.lower() for p in sensitive_patterns)]
+                                if mask_cols:
+                                    for row in parsed.get("rows", []):
+                                        for i in mask_cols:
+                                            if i < len(row) and row[i] is not None:
+                                                row[i] = "***"
+                                    llm_result = json.dumps(parsed, ensure_ascii=False)
+                        except Exception:
+                            pass
                     elif tool_name == "generate_chart":
                         charts = state.get("chart_data", []) or []
                         charts.append(original_result)
