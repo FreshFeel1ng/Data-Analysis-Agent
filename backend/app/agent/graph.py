@@ -157,28 +157,9 @@ def build_agent_graph():
                         charts.append(original_result)
                         state["chart_data"] = charts
 
-                    # Truncate large results for LLM context (state keeps full data)
+                    # Truncate oversized results to avoid blowing up LLM context
                     llm_result = original_result
-                    if tool_name == "generate_chart" and len(llm_result) > 2000:
-                        try:
-                            parsed = json.loads(llm_result)
-                            if "echarts_option" in parsed:
-                                opt = parsed["echarts_option"]
-                                parsed["echarts_option"] = {"_summary": f"[{opt.get('title',{}).get('text','')} {len(json.dumps(opt))} bytes]"}
-                            parsed["hint"] = f"[图表配置已生成]"
-                            llm_result = json.dumps(parsed, ensure_ascii=False)
-                        except (json.JSONDecodeError, TypeError):
-                            llm_result = '{"message": "图表已生成"}'
-                    elif tool_name == "execute_sql" and len(llm_result) > 4000:
-                        try:
-                            parsed = json.loads(llm_result)
-                            row_count = parsed.get("row_count", 0)
-                            parsed["rows"] = parsed.get("rows", [])[:50]
-                            parsed["hint"] = f"[显示前50行，共 {row_count} 行]"
-                            llm_result = json.dumps(parsed, ensure_ascii=False)
-                        except (json.JSONDecodeError, TypeError):
-                            llm_result = llm_result[:2000] + "..."
-                    elif len(llm_result) > 4000:
+                    if len(llm_result) > 8000:
                         llm_result = llm_result[:2000] + f"\n...[截断，共 {len(llm_result)} 字节]"
                 except Exception as e:
                     logger.exception(f"Tool {tool_name} failed: {e}")
