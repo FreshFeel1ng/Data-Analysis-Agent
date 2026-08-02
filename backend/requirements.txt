@@ -28,6 +28,7 @@ langgraph-checkpoint>=4.0.0
 openai>=2.0.0
 tiktoken>=0.8.0
 langchain-huggingface>=1.0.0
+langchain-ollama>=0.3.0
 
 # Local Embeddings (bge-small-zh-v1.5)
 sentence-transformers>=3.4.0

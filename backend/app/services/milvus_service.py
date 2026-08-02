@@ -11,10 +11,15 @@ DATABASE_NAME = settings.MILVUS_DATABASE
 
 _LOCAL_DIM = 512
 _OPENAI_DIM = 1536
+_OLLAMA_DIM = 4096  # nomic-embed-text default
 
 
 def _get_dimension() -> int:
-    return _LOCAL_DIM if settings.EMBEDDING_PROVIDER == "local" else _OPENAI_DIM
+    if settings.EMBEDDING_PROVIDER == "local":
+        return settings.EMBEDDING_DIMENSION or _LOCAL_DIM
+    elif settings.EMBEDDING_PROVIDER == "ollama":
+        return settings.EMBEDDING_DIMENSION or _OLLAMA_DIM
+    return _OPENAI_DIM
 
 
 DIMENSION = _get_dimension()
@@ -44,6 +49,13 @@ class MilvusService:
                 encode_kwargs={"normalize_embeddings": True},
             )
             logger.info(f"Loaded local embedding model: {settings.EMBEDDING_MODEL}")
+        elif settings.EMBEDDING_PROVIDER == "ollama":
+            from langchain_ollama import OllamaEmbeddings
+            self._embeddings = OllamaEmbeddings(
+                model=settings.EMBEDDING_MODEL,
+                base_url=settings.LLM_BASE_URL.replace("/v1", ""),
+            )
+            logger.info(f"Using Ollama embeddings: {settings.EMBEDDING_MODEL}")
         else:
             from langchain_openai import OpenAIEmbeddings
             api_key = settings.LLM_API_KEY or settings.OPENAI_API_KEY

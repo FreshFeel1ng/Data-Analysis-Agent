@@ -21,17 +21,18 @@ class Settings(BaseSettings):
     MILVUS_DATABASE: str = "tool_usage"
     MILVUS_COLLECTION: str = "tool_usage"
 
-    # LLM Provider: deepseek | openai
-    LLM_PROVIDER: Literal["deepseek", "openai"] = "deepseek"
+    # LLM Provider: deepseek | openai | ollama
+    LLM_PROVIDER: Literal["deepseek", "openai", "ollama"] = "deepseek"
     LLM_MODEL: str = "deepseek-chat"
     LLM_API_KEY: str = ""
     LLM_BASE_URL: str = "https://api.deepseek.com/v1"
     LLM_TEMPERATURE: float = 0.0
     LLM_MAX_TOKENS: int = 8192
 
-    # Embedding Provider: local | openai
-    EMBEDDING_PROVIDER: Literal["local", "openai"] = "local"
+    # Embedding Provider: local | openai | ollama
+    EMBEDDING_PROVIDER: Literal["local", "openai", "ollama"] = "local"
     EMBEDDING_MODEL: str = "BAAI/bge-small-zh-v1.5"
+    EMBEDDING_DIMENSION: int = 512  # 512 for bge-small, 4096 for ollama nomic-embed-text
 
     # OpenAI (fallback/compat)
     OPENAI_API_KEY: str = ""

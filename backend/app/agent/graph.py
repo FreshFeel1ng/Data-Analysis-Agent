@@ -74,6 +74,14 @@ def _create_llm():
             api_key=settings.LLM_API_KEY,
             base_url=settings.LLM_BASE_URL,
         )
+    elif settings.LLM_PROVIDER == "ollama":
+        return ChatOpenAI(
+            model=settings.LLM_MODEL,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            api_key="ollama",
+            base_url=settings.LLM_BASE_URL,
+        )
     else:
         return ChatOpenAI(
             model=settings.LLM_MODEL or settings.OPENAI_MODEL,
