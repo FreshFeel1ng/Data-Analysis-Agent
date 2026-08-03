@@ -16,6 +16,7 @@ class QueryResponse(BaseModel):
     explanation: Optional[str] = None
     chart_type: Optional[str] = None
     chart_data: Optional[Any] = None
+    total_tokens: Optional[int] = None
     success: bool
     error: Optional[str] = None
     created_at: Optional[datetime] = None

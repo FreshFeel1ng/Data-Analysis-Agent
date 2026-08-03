@@ -294,6 +294,11 @@ function SqlQuery() {
           </div>
         )}
 
+        {result.total_tokens > 0 && (
+          <div style={{ textAlign: 'right', fontSize: '12px', color: '#94a3b8', marginTop: '8px' }}>
+            Token 消耗: {result.total_tokens.toLocaleString()} | 模型: DeepSeek V4
+          </div>
+        )}
         {!result.success && <div className="error-msg">{result.error || '查询执行失败'}</div>}
       </div>
     );

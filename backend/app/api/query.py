@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.user import User
 from app.models.db_connection import DBConnection
 from app.models.query_history import QueryHistory
+from app.models.token_usage import TokenUsage
 from app.schemas.query import QueryRequest, QueryResponse
 from app.core.auth import get_current_user
 from app.core.permissions import check_tool_permission
@@ -17,6 +18,7 @@ from app.services.db_service import db_service
 from app.services.training_service import get_training_context, build_training_prompt
 from app.services.milvus_service import milvus_service
 from app.agent.tools import tool_registry
+from app.config import settings
 from app.api import api_router
 
 logger = logging.getLogger(__name__)
@@ -112,6 +114,8 @@ async def ask_question(
 
     # Save full result to query_history
     charts = result_data.get("chart_data")
+    total_tokens = result_data.get("total_tokens", 0)
+    token_details = result_data.get("token_details", []) or []
     history_record = QueryHistory(
         user_id=user.id,
         username=user.username,
@@ -122,10 +126,26 @@ async def ask_question(
         result_json=result_data.get("result"),
         chart_data=json.dumps(charts) if charts else None,
         explanation=result_data.get("explanation"),
+        total_tokens=total_tokens,
+        model_name=settings.LLM_MODEL,
         success=result_data.get("success", True),
         error_msg=result_data.get("error"),
     )
     db.add(history_record)
+    await db.commit()
+    await db.refresh(history_record)
+
+    # Save detailed per-call token records
+    for td in token_details:
+        tu = TokenUsage(
+            query_history_id=history_record.id,
+            user_id=user.id,
+            model_name=td.get("model", settings.LLM_MODEL),
+            prompt_tokens=td.get("prompt_tokens", 0),
+            completion_tokens=td.get("completion_tokens", 0),
+            total_tokens=td.get("total_tokens", 0),
+        )
+        db.add(tu)
     await db.commit()
     await db.refresh(history_record)
 

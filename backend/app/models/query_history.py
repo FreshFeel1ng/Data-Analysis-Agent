@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, JSON, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
 
@@ -16,6 +16,8 @@ class QueryHistory(Base):
     result_json = Column(Text, nullable=True)
     chart_data = Column(Text, nullable=True)
     explanation = Column(Text, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    model_name = Column(String(50), nullable=True)
     success = Column(Boolean, default=True)
     error_msg = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -25,11 +25,12 @@ class AgentState(TypedDict):
     similar_examples: str
     sql: Optional[str]
     query_result: Optional[str]
-    chart_data: Optional[list]  # list of ECharts option JSON strings
+    chart_data: Optional[list]
     final_response: Optional[str]
     success: bool
     tool_names_used: list[str]
     tool_params_used: list[dict]
+    token_details: list[dict]  # [{model, prompt_tokens, completion_tokens, total_tokens}]
 
 
 def create_tools():
@@ -111,6 +112,7 @@ def build_agent_graph():
         ]
         state["tool_names_used"] = []
         state["tool_params_used"] = []
+        state["token_details"] = []
         state["success"] = True
         return state
 
@@ -118,6 +120,20 @@ def build_agent_graph():
         messages = state["messages"]
         response = await llm_with_tools.ainvoke(messages)
         state["messages"] = [response]
+
+        # Capture token usage from LLM response metadata
+        usage = response.response_metadata.get("token_usage", {})
+        if usage:
+            details = state.get("token_details", []) or []
+            details.append({
+                "model": settings.LLM_MODEL,
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0),
+            })
+            state["token_details"] = details
+            logger.info(f"Token usage: prompt={usage.get('prompt_tokens')} completion={usage.get('completion_tokens')} total={usage.get('total_tokens')}")
+
         return state
 
     def should_continue(state: AgentState) -> Literal["tools", "finalize"]:
@@ -257,10 +273,13 @@ async def run_analysis(
         "success": True,
         "tool_names_used": [],
         "tool_params_used": [],
+        "token_details": [],
     }
 
     try:
         final_state = await agent_graph.ainvoke(initial_state)
+        tokens = final_state.get("token_details", []) or []
+        total_tokens = sum(t.get("total_tokens", 0) for t in tokens)
         return {
             "question": question,
             "sql": final_state.get("sql"),
@@ -270,6 +289,8 @@ async def run_analysis(
             "success": final_state.get("success", True),
             "tool_names_used": final_state.get("tool_names_used", []),
             "tool_params_used": final_state.get("tool_params_used", []),
+            "total_tokens": total_tokens,
+            "token_details": tokens,
         }
     except Exception as e:
         error_str = str(e)
