@@ -111,6 +111,53 @@ function SqlQuery() {
     setTimeout(() => setCopied(false), 2000);
   }, []);
 
+  // Merge ECharts template with actual query data based on __merge_data__ metadata
+  const mergeChartData = useCallback((option, queryData) => {
+    if (!option || !queryData) return option;
+    const merge = option.__merge_data__;
+    if (!merge) return option; // no metadata, use as-is
+
+    const cols = queryData.columns || [];
+    const rows = queryData.rows || [];
+    if (!cols.length || !rows.length) return option;
+
+    // Build column index lookup
+    const getColumn = (name) => {
+      const idx = cols.findIndex(c => c === name);
+      if (idx >= 0) return rows.map(r => r[idx]);
+      return [];
+    };
+
+    const merged = { ...option };
+    delete merged.__merge_data__;
+
+    if (merge.x_column) {
+      merged.xAxis = { ...merged.xAxis, data: getColumn(merge.x_column) };
+    }
+
+    if (merge.series_columns && merged.series) {
+      merge.series_columns.forEach((colName, i) => {
+        if (merged.series[i]) {
+          merged.series[i] = { ...merged.series[i], data: getColumn(colName) };
+        }
+      });
+    }
+
+    // Pie chart
+    if (merge.name_column && merge.value_column) {
+      const names = getColumn(merge.name_column);
+      const values = getColumn(merge.value_column);
+      if (merged.series && merged.series[0]) {
+        merged.series[0] = {
+          ...merged.series[0],
+          data: names.map((n, i) => ({ name: String(n), value: Number(values[i]) || 0 })),
+        };
+      }
+    }
+
+    return merged;
+  }, []);
+
   const renderQueryResult = () => {
     if (!result) return null;
 
@@ -126,12 +173,21 @@ function SqlQuery() {
     let chartOptions = [];
     if (result.chart_data) {
       try {
+        // Parse query result for data merging
+        let queryData = null;
+        if (result.result) {
+          const parsed = typeof result.result === 'string' ? JSON.parse(result.result) : result.result;
+          if (parsed.columns && parsed.rows) queryData = parsed;
+        }
+
         const raw = typeof result.chart_data === 'string' ? JSON.parse(result.chart_data) : result.chart_data;
-        // Support both array and single object
         const items = Array.isArray(raw) ? raw : [raw];
         chartOptions = items.map(item => {
           if (typeof item === 'string') item = JSON.parse(item);
-          if (item.echarts_option) return item.echarts_option;
+          if (item.echarts_option) {
+            // Merge template with actual data
+            return mergeChartData(item.echarts_option, queryData);
+          }
           if (item.image_base64) return item.image_base64; // legacy
           return null;
         }).filter(Boolean);

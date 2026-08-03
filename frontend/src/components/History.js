@@ -53,14 +53,38 @@ function History() {
     try { return JSON.parse(jsonStr); } catch { return null; }
   };
 
-  const getChartOptions = (chartData) => {
+  const mergeChartData = (option, queryData) => {
+    if (!option || !queryData) return option;
+    const merge = option.__merge_data__;
+    if (!merge) return option;
+    const cols = queryData.columns || [];
+    const rows = queryData.rows || [];
+    if (!cols.length || !rows.length) return option;
+    const getColumn = (name) => { const idx = cols.findIndex(c => c === name); return idx >= 0 ? rows.map(r => r[idx]) : []; };
+    const merged = { ...option };
+    delete merged.__merge_data__;
+    if (merge.x_column) merged.xAxis = { ...merged.xAxis, data: getColumn(merge.x_column) };
+    if (merge.series_columns && merged.series) merge.series_columns.forEach((colName, i) => { if (merged.series[i]) merged.series[i] = { ...merged.series[i], data: getColumn(colName) }; });
+    if (merge.name_column && merge.value_column && merged.series?.[0]) {
+      const names = getColumn(merge.name_column), values = getColumn(merge.value_column);
+      merged.series[0] = { ...merged.series[0], data: names.map((n, i) => ({ name: String(n), value: Number(values[i]) || 0 })) };
+    }
+    return merged;
+  };
+
+  const getChartOptions = (chartData, queryResult) => {
     if (!chartData) return [];
     try {
+      let queryData = null;
+      if (queryResult) {
+        const parsed = typeof queryResult === 'string' ? JSON.parse(queryResult) : queryResult;
+        if (parsed.columns && parsed.rows) queryData = parsed;
+      }
       const raw = typeof chartData === 'string' ? JSON.parse(chartData) : chartData;
       const items = Array.isArray(raw) ? raw : [raw];
       return items.map(item => {
         if (typeof item === 'string') item = JSON.parse(item);
-        if (item.echarts_option) return item.echarts_option;
+        if (item.echarts_option) return mergeChartData(item.echarts_option, queryData);
         if (item.image_base64) return item.image_base64;
         return null;
       }).filter(Boolean);
@@ -128,7 +152,7 @@ function History() {
           {records.map((r) => {
             const isOpen = expanded === r.id;
             const resultData = parseResult(r.result_json);
-            const chartOptions = getChartOptions(r.chart_data);
+            const chartOptions = getChartOptions(r.chart_data, r.result_json);
             const hasDetail = r.sql || resultData || chartOptions.length > 0 || r.explanation;
 
             return (
