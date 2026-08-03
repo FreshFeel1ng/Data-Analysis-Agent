@@ -2,6 +2,7 @@
 
 import logging
 import json
+import pandas as pd
 from typing import Annotated, TypedDict, Literal, Optional
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
@@ -170,20 +171,50 @@ def build_agent_graph():
 
                     if tool_name == "execute_sql":
                         state["query_result"] = original_result
-                        # Data safety: only send column metadata + sample to LLM
+                        # Data safety: compute aggregated statistics locally, only send summary to LLM
                         try:
                             parsed = json.loads(original_result)
                             columns = parsed.get("columns", [])
-                            row_count = parsed.get("row_count", 0)
-                            first_row = parsed.get("rows", [])[0] if parsed.get("rows") else []
-                            llm_result = json.dumps({
-                                "columns": columns,
-                                "row_count": row_count,
-                                "sample_row": first_row,
-                                "hint": "图表配置请使用 x_column/y_column 指定列名，前端会自动填入实际数据"
-                            }, ensure_ascii=False)
+                            rows = parsed.get("rows", [])
+                            row_count = parsed.get("row_count", len(rows))
+
+                            if rows and columns:
+                                df = pd.DataFrame(rows, columns=columns)
+                                num_df = df.select_dtypes(include="number")
+
+                                summary = {
+                                    "columns": columns,
+                                    "row_count": row_count,
+                                    "numeric_stats": {},
+                                }
+
+                                for col in num_df.columns:
+                                    summary["numeric_stats"][col] = {
+                                        "min": round(float(num_df[col].min()), 2),
+                                        "max": round(float(num_df[col].max()), 2),
+                                        "avg": round(float(num_df[col].mean()), 2),
+                                        "total": round(float(num_df[col].sum()), 2),
+                                    }
+
+                                # Top 3 and bottom 2 by first numeric column (if sorted DESC)
+                                if len(num_df.columns) >= 1 and len(df.columns) >= 2:
+                                    sort_col = num_df.columns[0]
+                                    cat_col = df.columns[0] if df.columns[0] not in num_df.columns else df.columns[1]
+                                    sorted_df = df.sort_values(sort_col, ascending=False)
+                                    summary["top_items"] = sorted_df.head(3).to_dict(orient="records")
+                                    summary["bottom_items"] = sorted_df.tail(2).to_dict(orient="records")
+
+                                    # Concentration: what % top 3 covers
+                                    total = num_df[sort_col].sum()
+                                    top3_sum = sorted_df[sort_col].head(3).sum()
+                                    if total > 0:
+                                        summary["concentration"] = f"前3名占比 {round(float(top3_sum / total * 100), 1)}%"
+                            else:
+                                summary = {"columns": columns, "row_count": row_count, "message": "无数据行"}
+
+                            llm_result = json.dumps(summary, ensure_ascii=False)
                         except Exception:
-                            logger.exception("Failed to mask execute_sql result for LLM")
+                            logger.exception("Failed to compute statistics for LLM")
                     elif tool_name == "generate_chart":
                         charts = state.get("chart_data", []) or []
                         charts.append(original_result)
