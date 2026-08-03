@@ -165,31 +165,31 @@ def build_agent_graph():
                     original_result = str(result)
                     logger.info(f"Tool {tool_name} succeeded, result length: {len(original_result)}")
 
-                    # Save SQL and chart data to state before truncating
+                    # Build LLM result (may differ from original for security)
+                    llm_result = original_result
+
                     if tool_name == "execute_sql":
                         state["query_result"] = original_result
-                        # Only send column metadata to LLM (data stays local)
+                        # Data safety: only send column metadata + sample to LLM
                         try:
                             parsed = json.loads(original_result)
                             columns = parsed.get("columns", [])
                             row_count = parsed.get("row_count", 0)
-                            # Send only structure: column names + row count + first row (as type sample)
                             first_row = parsed.get("rows", [])[0] if parsed.get("rows") else []
                             llm_result = json.dumps({
                                 "columns": columns,
                                 "row_count": row_count,
-                                "sample_row": first_row,  # type reference only
+                                "sample_row": first_row,
                                 "hint": "图表配置请使用 x_column/y_column 指定列名，前端会自动填入实际数据"
                             }, ensure_ascii=False)
                         except Exception:
-                            pass
+                            logger.exception("Failed to mask execute_sql result for LLM")
                     elif tool_name == "generate_chart":
                         charts = state.get("chart_data", []) or []
                         charts.append(original_result)
                         state["chart_data"] = charts
 
-                    # Truncate oversized results to avoid blowing up LLM context
-                    llm_result = original_result
+                    # Truncate oversized results
                     if len(llm_result) > 8000:
                         llm_result = llm_result[:2000] + f"\n...[截断，共 {len(llm_result)} 字节]"
                 except Exception as e:
